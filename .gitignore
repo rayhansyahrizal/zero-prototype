@@ -1,0 +1,82 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Data and models (keep structure, ignore large files)
+data/embeddings/*.npz
+data/embeddings/*.npy
+data/*.npy
+*.pt
+*.pth
+*.ckpt
+
+# Results
+results/*.json
+results/*.csv
+results/*.log
+results/*.png
+results/*.jpg
+
+# Cached models
+transformers_cache/
+huggingface_cache/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Large datasets (keep structure)
+roco-dataset/data/*/radiology/images/*
+roco-dataset/data/*/non-radiology/images/*
+
+# Keep directory structure
+!.gitkeep
+!README.md
+
+.github
+docs
+
+roco-dataset
+MedImageInsights

@@ -1,0 +1,59 @@
+# Zero-shot Medical Image Captioning Configuration
+
+# Dataset configuration
+dataset:
+  # Source: 'local' or 'huggingface'
+  source: "huggingface"  # Use HF by default since local images not ready
+  
+  # For Hugging Face datasets
+  name: "eltorio/ROCOv2-radiology"  # HF dataset identifier
+  
+  # For local ROCO dataset
+  root_dir: "/mnt/nas-hpg9/rayhan/zero-prototype/roco-dataset"
+  modality: "radiology"  # Only used for local dataset
+  
+  # Common settings
+  split: "test"  # train/validation/test
+  max_samples: 1000  # Limit dataset size for quick testing
+  
+# MedImageInsight model paths
+medimageinsight:
+  model_dir: "/mnt/nas-hpg9/rayhan/zero-prototype/MedImageInsights/2024.09.27"
+  vision_model_name: "medimageinsigt-v1.0.0.pt"
+  language_model_name: "language_model.pth"  # Not used but required by API
+  
+# BLIP2 model
+blip2:
+  model_name: "Salesforce/blip2-opt-2.7b"
+  device: "cuda"  # or "cpu"
+  max_length: 50
+  num_beams: 5
+  
+# Retrieval settings
+retrieval:
+  top_k: 5  # Number of captions to retrieve
+  use_prototypes: false  # Enable prototype sampling
+  
+# Prototype sampling
+sampling:
+  num_prototypes: 100  # Number of prototypes to select
+  method: "farthest_point"  # Sampling strategy
+  
+# Evaluation
+evaluation:
+  metrics: ["bleu", "meteor"]
+  save_results: true
+  
+# Paths for saving outputs
+output:
+  embeddings_dir: "data/embeddings"
+  prototypes_path: "data/prototypes.npy"
+  results_dir: "results"
+  captions_file: "results/captions.json"
+  metrics_file: "results/metrics.csv"
+  
+# Logging
+logging:
+  level: "INFO"
+  save_logs: true
+  log_file: "results/pipeline.log"
