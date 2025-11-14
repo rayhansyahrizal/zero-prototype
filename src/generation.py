@@ -70,46 +70,114 @@ class CaptionGenerator:
         self,
         image: Image.Image,
         context: Optional[str] = None,
+        retrieved_captions: Optional[List[Dict[str, any]]] = None,
         max_length: Optional[int] = None,
-        num_beams: Optional[int] = None
+        num_beams: Optional[int] = None,
+        similarity_threshold: Optional[float] = None
     ) -> str:
         """
-        Generate caption for a single image.
-        
+        Generate caption for a single image with optional retrieval context.
+
         Args:
             image: PIL Image
-            context: Optional context text to condition generation
+            context: Optional raw context text (deprecated - use retrieved_captions)
+            retrieved_captions: List of retrieved caption dicts with 'caption' and 'similarity'
             max_length: Maximum caption length (used for max_new_tokens)
             num_beams: Number of beams for beam search
-            
+            similarity_threshold: Minimum similarity to include in context (filter low-quality retrievals)
+
         Returns:
             Generated caption string
         """
         if self.model is None:
             raise RuntimeError("Model not loaded. Call load_model() first.")
-        
+
         # Set generation parameters
         max_new_tokens = max_length or self.blip2_config['max_length']
         num_beams = num_beams or self.blip2_config['num_beams']
-        
-        # Prepare inputs
-        if context:
-            # Retrieval-augmented generation
-            # Truncate context to avoid excessive input length
-            # Keep only ~150 tokens of context to leave room for image features
-            max_context_length = 150
-            context_words = context.split()
-            if len(context_words) > max_context_length:
-                context = ' '.join(context_words[:max_context_length]) + "..."
+
+        # Prepare inputs with tokenizer-based truncation
+        if retrieved_captions:
+            # NEW: Filter by similarity threshold
+            if similarity_threshold is not None:
+                filtered_captions = [
+                    c for c in retrieved_captions
+                    if c['similarity'] >= similarity_threshold
+                ]
+
+                # If all captions filtered out, fall back to baseline (no context)
+                if not filtered_captions:
+                    logger.debug(
+                        f"All retrieved captions below threshold {similarity_threshold:.2f}, "
+                        f"using baseline generation"
+                    )
+                    retrieved_captions = None
+                else:
+                    retrieved_captions = filtered_captions
+                    logger.debug(
+                        f"Filtered to {len(filtered_captions)}/{len(retrieved_captions)} "
+                        f"captions above threshold {similarity_threshold:.2f}"
+                    )
+
+        if retrieved_captions:
+            # Construct prompt following thesis methodology
+            context_lines = [f"- {c['caption']}" for c in retrieved_captions]
+            prompt = (
+                "Based on the context of similar medical images:\n" +
+                "\n".join(context_lines) +
+                "\nDescribe the current image in clinical terms:"
+            )
             
-            prompt = f"Context: {context}\n\nBased on the context, describe this medical image:"
+            # Use BLIP2 tokenizer to truncate by tokens (not words)
+            # Max 150 tokens for context to leave room for image features
+            MAX_PROMPT_TOKENS = 150
+            
+            # Tokenize and truncate
+            prompt_tokens = self.processor.tokenizer(
+                prompt,
+                truncation=True,
+                max_length=MAX_PROMPT_TOKENS,
+                return_tensors="pt"
+            )
+            
+            # Decode back to get truncated prompt text
+            truncated_prompt = self.processor.tokenizer.decode(
+                prompt_tokens['input_ids'][0],
+                skip_special_tokens=True
+            )
+            
             inputs = self.processor(
                 images=image,
-                text=prompt,
+                text=truncated_prompt,
+                return_tensors="pt"
+            ).to(self.device)
+            
+            logger.debug(f"Prompt length: {len(prompt_tokens['input_ids'][0])} tokens")
+            
+        elif context:
+            # Backward compatibility: use raw context string
+            # Still apply tokenizer-based truncation
+            prompt = f"Context: {context}\n\nBased on the context, describe this medical image:"
+            
+            prompt_tokens = self.processor.tokenizer(
+                prompt,
+                truncation=True,
+                max_length=150,
+                return_tensors="pt"
+            )
+            
+            truncated_prompt = self.processor.tokenizer.decode(
+                prompt_tokens['input_ids'][0],
+                skip_special_tokens=True
+            )
+            
+            inputs = self.processor(
+                images=image,
+                text=truncated_prompt,
                 return_tensors="pt"
             ).to(self.device)
         else:
-            # Baseline generation
+            # Baseline generation (no context)
             inputs = self.processor(
                 images=image,
                 return_tensors="pt"
@@ -126,10 +194,21 @@ class CaptionGenerator:
             )
         
         # Decode caption
-        caption = self.processor.batch_decode(
-            generated_ids, skip_special_tokens=True
-        )[0].strip()
-        
+        # IMPORTANT: Only decode the newly generated tokens, not the input prompt
+        # generated_ids contains [prompt tokens + new tokens], we only want new tokens
+        if retrieved_captions or context:
+            # When using context, skip the prompt tokens
+            prompt_length = inputs.input_ids.shape[1]
+            generated_tokens_only = generated_ids[:, prompt_length:]
+            caption = self.processor.batch_decode(
+                generated_tokens_only, skip_special_tokens=True
+            )[0].strip()
+        else:
+            # Baseline mode (no prompt), decode everything
+            caption = self.processor.batch_decode(
+                generated_ids, skip_special_tokens=True
+            )[0].strip()
+
         return caption
     
     def generate_baseline(
@@ -169,26 +248,47 @@ class CaptionGenerator:
         images: List[Image.Image],
         image_ids: List[str],
         retriever,
-        use_prototypes: bool = False
+        use_prototypes: bool = False,
+        use_tta: bool = False,
+        tta_params: Optional[Dict] = None,
+        similarity_threshold: Optional[float] = None
     ) -> List[Dict[str, str]]:
         """
         Generate captions with retrieval-augmented context.
-        
+
+        Follows thesis methodology:
+        1. (Optional) Apply TTA to adapt query embedding
+        2. Retrieve top-k similar captions using adapted embedding
+        3. Construct prompt with retrieved captions
+        4. Generate caption with BLIP2
+
         Args:
             images: List of PIL Images
             image_ids: List of image IDs
             retriever: CaptionRetriever or PrototypeRetriever instance
             use_prototypes: Whether using prototype retriever
-            
+            use_tta: Whether to use Test-Time Adaptation (only for PrototypeRetriever)
+            tta_params: TTA parameters (learning_rate, num_steps, etc.)
+            similarity_threshold: Minimum similarity to include retrieved captions in context
+
         Returns:
             List of dictionaries with image_id, caption, and retrieved context
         """
         method = "prototype" if use_prototypes else "retrieval"
+        if use_tta:
+            method += "+TTA"
+        
         logger.info(f"Generating captions with {method}...")
         
         results = []
         
         # Retrieve for all images
+        # Note: TTA is applied inside retrieve_by_image_embedding if use_tta=True
+        if use_tta:
+            logger.info("⚙️  Menjalankan adaptasi 1D test-time (scaling vector)...")
+            logger.info(f"   - Learning rate: {tta_params.get('learning_rate', 1e-3)}")
+            logger.info(f"   - Iterasi: {tta_params.get('num_steps', 10)} steps")
+
         retrieved_contexts = retriever.batch_retrieve(use_image_similarity=True)
         
         for idx, (image_id, image) in enumerate(tqdm(
@@ -199,18 +299,31 @@ class CaptionGenerator:
             # Get retrieved captions
             if idx in retrieved_contexts:
                 retrieved = retrieved_contexts[idx]
-                context = retriever.format_retrieved_context(retrieved)
+                # Format as plain text for logging
+                context_str = retriever.format_retrieved_context(retrieved)
+
+                # Log retrieval context (hanya 3 sample pertama biar ga spam)
+                if idx < 3:
+                    logger.info(f"\n📋 [Retrieval] Image: {image_id}")
+                    for i, r in enumerate(retrieved[:3], 1):  # Log top-3 aja
+                        logger.info(f"   {i}. (sim={r['similarity']:.3f}) {r['caption'][:80]}...")
             else:
-                context = ""
-            
-            # Generate caption with context
-            caption = self.generate_caption(image, context=context)
-            
+                retrieved = []
+                context_str = ""
+
+            # Generate caption with structured retrieved captions and similarity filtering
+            caption = self.generate_caption(
+                image,
+                retrieved_captions=retrieved if retrieved else None,
+                similarity_threshold=similarity_threshold
+            )
+
             results.append({
                 'image_id': image_id,
                 'caption': caption,
                 'method': method,
-                'retrieved_context': context
+                'retrieved_context': context_str,
+                'retrieved_captions': retrieved  # Keep structured data for evaluation
             })
         
         return results
@@ -220,43 +333,86 @@ class CaptionGenerator:
         images: List[Image.Image],
         image_ids: List[str],
         retriever=None,
-        prototype_retriever=None
+        prototype_retriever=None,
+        config: Optional[Dict] = None
     ) -> Dict[str, List[Dict[str, str]]]:
         """
-        Generate captions using all three modes.
-        
+        Generate captions using all three modes following thesis methodology.
+
+        Modes:
+        1. Baseline BLIP2 (no retrieval)
+        2. BLIP2 + Retrieval (visual embedding similarity)
+        3. BLIP2 + Prototype Sampling (with optional TTA)
+
         Args:
             images: List of PIL Images
             image_ids: List of image IDs
             retriever: CaptionRetriever instance (optional)
             prototype_retriever: PrototypeRetriever instance (optional)
-            
+            config: Configuration dict with TTA settings
+
         Returns:
             Dictionary with results for each mode
         """
         if self.model is None:
             self.load_model()
-        
+
         results = {}
-        
+
+        # Extract similarity threshold from config
+        similarity_threshold = None
+        if config and 'retrieval' in config:
+            similarity_threshold = config['retrieval'].get('similarity_threshold')
+            if similarity_threshold:
+                logger.info(f"Using similarity threshold: {similarity_threshold}")
+
         # 1. Baseline
-        logger.info("\n=== Mode 1: Baseline BLIP2 ===")
+        logger.info("\n=== Mode 1: Baseline BLIP2 (no retrieval) ===")
         results['baseline'] = self.generate_baseline(images, image_ids)
-        
-        # 2. Retrieval-augmented
+
+        # 2. Retrieval-augmented (visual embedding similarity)
         if retriever is not None:
-            logger.info("\n=== Mode 2: BLIP2 + Retrieval ===")
+            logger.info("\n=== Mode 2: BLIP2 + Retrieval (visual embedding similarity) ===")
             results['retrieval'] = self.generate_with_retrieval(
-                images, image_ids, retriever, use_prototypes=False
+                images, image_ids, retriever,
+                use_prototypes=False,
+                use_tta=False,
+                similarity_threshold=similarity_threshold
             )
         else:
             logger.warning("Retriever not provided, skipping retrieval mode")
         
-        # 3. Prototype-augmented
+        # 3. Prototype-augmented (with optional TTA)
         if prototype_retriever is not None:
-            logger.info("\n=== Mode 3: BLIP2 + Prototype Sampling ===")
+            # Check if TTA is enabled
+            use_tta = False
+            tta_params = None
+            
+            if config and 'tta' in config:
+                tta_config = config['tta']
+                use_tta = tta_config.get('enabled', False)
+                
+                if use_tta:
+                    tta_params = {
+                        'learning_rate': tta_config.get('learning_rate', 1e-3),
+                        'num_steps': tta_config.get('num_steps', 10),
+                        'top_k_for_loss': tta_config.get('top_k_for_loss', 2),
+                        'weight_variance': tta_config.get('weight_variance', 0.1),
+                        'weight_entropy': tta_config.get('weight_entropy', 0.01)
+                    }
+                    logger.info(f"TTA enabled with params: {tta_params}")
+            
+            mode_name = "Mode 3: BLIP2 + Prototype Sampling"
+            if use_tta:
+                mode_name += " + TTA"
+            
+            logger.info(f"\n=== {mode_name} ===")
             results['prototype'] = self.generate_with_retrieval(
-                images, image_ids, prototype_retriever, use_prototypes=True
+                images, image_ids, prototype_retriever,
+                use_prototypes=True,
+                use_tta=use_tta,
+                tta_params=tta_params,
+                similarity_threshold=similarity_threshold
             )
         else:
             logger.warning("Prototype retriever not provided, skipping prototype mode")

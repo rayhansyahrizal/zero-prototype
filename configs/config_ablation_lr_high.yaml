@@ -1,0 +1,51 @@
+# Configuration for TTA ablation: High learning rate
+
+dataset:
+  source: "huggingface"
+  name: "eltorio/ROCOv2-radiology"
+  split: "test"
+  max_samples: 500
+
+medimageinsight:
+  model_dir: "/mnt/nas-hpg9/rayhan/zero-prototype/MedImageInsights/2024.09.27"
+  vision_model_name: "medimageinsigt-v1.0.0.pt"
+  language_model_name: "language_model.pth"
+
+blip2:
+  model_name: "Salesforce/blip2-opt-2.7b"
+  device: "cuda"
+  max_length: 50
+  num_beams: 5
+
+retrieval:
+  top_k: 5
+  filter_modality: true
+
+sampling:
+  num_prototypes: 100
+  method: "farthest_point"
+
+# TTA settings - HIGH LEARNING RATE
+tta:
+  enabled: true
+  learning_rate: 0.01  # ABLATION: High LR
+  num_steps: 10
+  top_k_for_loss: 2
+  weight_variance: 0.1
+  weight_entropy: 0.01
+
+evaluation:
+  metrics: ["bleu", "meteor"]
+  save_results: true
+
+output:
+  embeddings_dir: "data/embeddings"
+  prototypes_path: "data/prototypes.npy"
+  results_dir: "results/ablation_lr_high"
+  captions_file: "results/ablation_lr_high/captions.json"
+  metrics_file: "results/ablation_lr_high/metrics.csv"
+
+logging:
+  level: "INFO"
+  save_logs: true
+  log_file: "results/ablation_lr_high/pipeline.log"

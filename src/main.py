@@ -158,9 +158,9 @@ def run_pipeline(
     start_time = datetime.now()
     
     logger.info("\n" + "=" * 60)
-    logger.info("ZERO-SHOT MEDICAL IMAGE CAPTIONING PIPELINE")
+    logger.info("🚀 PIPELINE ZERO-SHOT MEDICAL IMAGE CAPTIONING")
     logger.info("=" * 60)
-    
+
     # ========== Step 1: Load Dataset ==========
     logger.info("\n[Step 1/6] Loading dataset...")
     
@@ -186,10 +186,11 @@ def run_pipeline(
             samples.append({
                 'image_id': normalized['image_id'],
                 'image': hf_loader.load_image(normalized['image']),
-                'caption': normalized['caption']
+                'caption': normalized['caption'],
+                'modality': normalized.get('modality', 'UNKNOWN')
             })
         
-        logger.info(f"Loaded {len(samples)} samples from Hugging Face")
+        logger.info(f"✅ Berhasil load {len(samples)} sampel dari Hugging Face")
         
         # Create a simple wrapper that matches ROCODataLoader interface
         class HFDataWrapper:
@@ -204,7 +205,8 @@ def run_pipeline(
                 return {
                     'image_id': sample['image_id'],
                     'image_path': None,  # Image already loaded
-                    'caption': sample['caption']
+                    'caption': sample['caption'],
+                    'modality': sample.get('modality', 'UNKNOWN')
                 }
             
             def get_all_samples(self):
@@ -229,14 +231,14 @@ def run_pipeline(
         )
     
     if len(data_loader) == 0:
-        logger.error("No samples loaded. Cannot proceed.")
+        logger.error("❌ Ga ada sampel yang ke-load. Gabisa lanjut.")
         return
-    
-    logger.info(f"Loaded {len(data_loader)} samples")
+
+    logger.info(f"✅ Berhasil load {len(data_loader)} sampel")
     
     # ========== Step 2: Generate Embeddings ==========
     if not skip_embedding:
-        logger.info("\n[Step 2/6] Generating embeddings...")
+        logger.info("\n[Step 2/6] Generate embedding pake MedImageInsight...")
         
         embedding_generator = EmbeddingGenerator(config)
         embeddings_data = embedding_generator.generate_and_save_embeddings(
@@ -244,12 +246,12 @@ def run_pipeline(
             force_regenerate=force_regenerate
         )
     else:
-        logger.info("\n[Step 2/6] Loading cached embeddings...")
+        logger.info("\n[Step 2/6] Skip generate, load embedding dari cache...")
         import numpy as np
         
         embeddings_file = Path(config['output']['embeddings_dir']) / "embeddings.npz"
         if not embeddings_file.exists():
-            logger.error(f"Embeddings file not found: {embeddings_file}")
+            logger.error(f"❌ File embedding ga ketemu: {embeddings_file}")
             return
         
         data = np.load(embeddings_file, allow_pickle=True)
@@ -259,10 +261,20 @@ def run_pipeline(
             'image_ids': data['image_ids'].tolist(),
             'captions': data['captions'].tolist()
         }
-        logger.info(f"Loaded {len(embeddings_data['image_ids'])} embeddings")
+        # Handle backward compatibility for modalities
+        if 'modalities' in data:
+            embeddings_data['modalities'] = data['modalities'].tolist()
+        else:
+            logger.warning("Old embedding format detected, extracting modalities...")
+            from data_loader import extract_modality
+            embeddings_data['modalities'] = [
+                extract_modality(cap, img_id)
+                for cap, img_id in zip(embeddings_data['captions'], embeddings_data['image_ids'])
+            ]
+        logger.info(f"✅ Berhasil load {len(embeddings_data['image_ids'])} embedding")
     
     # ========== Step 3: Sample Prototypes ==========
-    logger.info("\n[Step 3/6] Sampling prototypes...")
+    logger.info("\n[Step 3/6] Sampling prototype pake FPS...")
     
     prototype_indices = sample_and_save_prototypes(
         config,
@@ -271,35 +283,37 @@ def run_pipeline(
     )
     
     # ========== Step 4: Setup Retrievers ==========
-    logger.info("\n[Step 4/6] Setting up retrievers...")
+    logger.info("\n[Step 4/6] Setup retriever untuk baseline & prototype...")
     
-    # Regular retriever
+    # Regular retriever (with modality support)
     retriever = CaptionRetriever(
         image_embeddings=embeddings_data['image_embeddings'],
         text_embeddings=embeddings_data['text_embeddings'],
         captions=embeddings_data['captions'],
         image_ids=embeddings_data['image_ids'],
+        modalities=embeddings_data.get('modalities'),
         top_k=config['retrieval']['top_k']
     )
     
-    # Prototype retriever
+    # Prototype retriever (with TTA and modality support)
     prototype_retriever = PrototypeRetriever(
         image_embeddings=embeddings_data['image_embeddings'],
         text_embeddings=embeddings_data['text_embeddings'],
         captions=embeddings_data['captions'],
         image_ids=embeddings_data['image_ids'],
+        modalities=embeddings_data.get('modalities'),
         prototype_indices=prototype_indices,
         top_k=config['retrieval']['top_k']
     )
     
-    logger.info("Retrievers initialized")
+    logger.info("✅ Retriever siap, modality filtering aktif")
     
     # ========== Step 5: Generate Captions ==========
     if not skip_generation:
-        logger.info("\n[Step 5/6] Generating captions...")
-        
+        logger.info("\n[Step 5/6] Generate caption pake BLIP2...")
+
         # Load images for generation
-        logger.info("Loading images...")
+        logger.info("Load gambar untuk generation...")
         images = []
         image_ids = []
         
@@ -318,7 +332,7 @@ def run_pipeline(
             except Exception as e:
                 logger.warning(f"Failed to load {sample['image_id']}: {e}")
         
-        logger.info(f"Loaded {len(images)} images for generation")
+        logger.info(f"✅ Berhasil load {len(images)} gambar")
         
         # Generate captions
         generator = CaptionGenerator(config)
@@ -326,53 +340,87 @@ def run_pipeline(
             images=images,
             image_ids=image_ids,
             retriever=retriever,
-            prototype_retriever=prototype_retriever
+            prototype_retriever=prototype_retriever,
+            config=config  # Pass config for TTA settings
         )
     else:
-        logger.info("\n[Step 5/6] Loading cached generation results...")
+        logger.info("\n[Step 5/6] Skip generate, load caption dari cache...")
         import json
         
         captions_file = Path(config['output']['captions_file'])
         if not captions_file.exists():
-            logger.error(f"Captions file not found: {captions_file}")
+            logger.error(f"❌ File caption ga ketemu: {captions_file}")
             return
         
         with open(captions_file) as f:
             results = json.load(f)
         
-        logger.info(f"Loaded results for {len(results)} methods")
+        logger.info(f"✅ Berhasil load hasil untuk {len(results)} metode")
     
     # ========== Step 6: Evaluate Results ==========
-    logger.info("\n[Step 6/6] Evaluating results...")
+    logger.info("\n[Step 6/6] Evaluasi hasil (BLEU-4, METEOR, Semantic Sim)...")
     
-    # Build ground truth dictionary
-    ground_truths = {
-        sample['image_id']: sample['caption']
-        for sample in data_loader.get_all_samples()
-    }
+    # Build ground truth dictionary and modality mapping
+    ground_truths = {}
+    modality_map = {}
+    for sample in data_loader.get_all_samples():
+        image_id = sample['image_id']
+        ground_truths[image_id] = sample['caption']
+        modality_map[image_id] = sample.get('modality', 'UNKNOWN')
     
-    # Evaluate
-    evaluator = CaptionEvaluator()
-    scores = evaluator.evaluate_results(results, ground_truths)
+    # Load MedImageInsight model for semantic similarity evaluation
+    logger.info("Load text encoder untuk semantic similarity...")
+    text_embedding_model = None
+    try:
+        # Reuse the embedding generator's model
+        embedding_generator_for_eval = EmbeddingGenerator(config)
+        embedding_generator_for_eval.load_model()
+        text_embedding_model = embedding_generator_for_eval.model
+        logger.info("✅ Text encoder siap untuk evaluasi")
+    except Exception as e:
+        logger.warning(f"Could not load text encoder for semantic similarity: {e}")
+        logger.warning("Semantic similarity will be disabled")
     
-    # Save results with timestamp
+    # Evaluate with detailed per-sample logging
+    evaluator = CaptionEvaluator(
+        text_embedding_model=text_embedding_model,
+        use_semantic_similarity=True
+    )
+    scores, detailed_scores = evaluator.evaluate_results(
+        results, 
+        ground_truths,
+        modalities=modality_map
+    )
+    
+    # Save results with timestamp and detailed per-sample scores
     if config['evaluation'].get('save_results', True):
-        save_results(results, scores, config, timestamp=timestamp)
+        save_results(
+            results, 
+            scores, 
+            config, 
+            timestamp=timestamp,
+            detailed_scores=detailed_scores
+        )
     
     # Display comparison
     logger.info("\n" + "=" * 60)
-    logger.info("RESULTS COMPARISON")
+    logger.info("📊 PERBANDINGAN HASIL METODE")
     logger.info("=" * 60)
-    
+
     comparison = compare_methods(scores)
     print("\n" + comparison.to_string())
-    
+
+    # Save comparison table to CSV
+    comparison_csv = Path(config['output']['results_dir']) / f"comparison_{timestamp}.csv"
+    comparison.to_csv(comparison_csv, float_format='%.4f')
+    logger.info(f"\n💾 Tabel perbandingan disimpan ke: {comparison_csv}")
+
     # Summary
     end_time = datetime.now()
     duration = (end_time - start_time).total_seconds()
-    
+
     logger.info("\n" + "=" * 60)
-    logger.info(f"Pipeline completed in {duration:.1f} seconds")
+    logger.info(f"✅ Pipeline selesai dalam {duration:.1f} detik")
     logger.info("=" * 60)
 
 

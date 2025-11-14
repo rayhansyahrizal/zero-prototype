@@ -4,12 +4,52 @@ Loads images and captions, handles preprocessing.
 """
 
 import os
+import re
 from pathlib import Path
 from typing import List, Dict, Tuple, Optional
 from PIL import Image
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def extract_modality(caption: str, image_id: str = "") -> str:
+    """
+    Extract medical image modality from caption or image ID.
+    
+    Looks for common modality indicators like:
+    - X-ray, XR, radiograph
+    - CT, computed tomography
+    - MRI, magnetic resonance
+    - Ultrasound, US
+    - PET, positron emission
+    
+    Args:
+        caption: Image caption text
+        image_id: Image identifier
+        
+    Returns:
+        Modality string (XR, CT, MRI, US, PET, or UNKNOWN)
+    """
+    # Combine caption and ID for searching
+    text = f"{caption} {image_id}".lower()
+    
+    # Define modality patterns (order matters - more specific first)
+    modality_patterns = [
+        (r'\b(x-ray|xray|radiograph|chest\s+film)\b', 'XR'),
+        (r'\b(ct|computed\s+tomography|cat\s+scan)\b', 'CT'),
+        (r'\b(mri|magnetic\s+resonance|nmr)\b', 'MRI'),
+        (r'\b(ultrasound|sonography|us|echo)\b', 'US'),
+        (r'\b(pet|positron\s+emission)\b', 'PET'),
+        (r'\b(mammography|mammogram)\b', 'MG'),
+        (r'\b(angiography|angiogram)\b', 'ANGIO'),
+    ]
+    
+    for pattern, modality in modality_patterns:
+        if re.search(pattern, text):
+            return modality
+    
+    return 'UNKNOWN'
 
 
 class ROCODataLoader:
@@ -86,10 +126,14 @@ class ROCODataLoader:
                         # Image not found, skip
                         continue
                 
+                # Extract modality from caption
+                modality = extract_modality(caption, image_id)
+                
                 samples.append({
                     'image_id': image_id,
                     'image_path': str(image_path),
-                    'caption': caption.strip()
+                    'caption': caption.strip(),
+                    'modality': modality
                 })
                 
                 # Limit samples if specified

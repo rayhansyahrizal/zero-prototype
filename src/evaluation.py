@@ -1,13 +1,13 @@
 """
 Evaluation module for caption quality assessment.
-Implements BLEU and METEOR metrics.
+Implements BLEU, METEOR, and semantic similarity metrics.
 """
 
 import nltk
 from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
 from nltk.translate.meteor_score import meteor_score
 import numpy as np
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Optional
 import logging
 import pandas as pd
 from pathlib import Path
@@ -42,12 +42,30 @@ except Exception as e:
 
 
 class CaptionEvaluator:
-    """Evaluate generated captions using standard metrics."""
+    """Evaluate generated captions using standard metrics (BLEU, METEOR, semantic similarity)."""
     
-    def __init__(self):
-        """Initialize evaluator."""
+    def __init__(self, text_embedding_model=None, use_semantic_similarity: bool = True):
+        """
+        Initialize evaluator.
+        
+        Args:
+            text_embedding_model: MedImageInsight text encoder for semantic similarity
+            use_semantic_similarity: Whether to compute semantic similarity
+        """
         self.smoothing = SmoothingFunction()
-        logger.info("CaptionEvaluator initialized")
+        self.text_embedding_model = text_embedding_model
+        self.use_semantic_similarity = use_semantic_similarity and (text_embedding_model is not None)
+        
+        if use_semantic_similarity and text_embedding_model is None:
+            logger.warning(
+                "Semantic similarity requested but no text embedding model provided. "
+                "Pass MedImageInsight text encoder to enable semantic similarity."
+            )
+        
+        logger.info(
+            f"CaptionEvaluator initialized "
+            f"(semantic_similarity={'enabled' if self.use_semantic_similarity else 'disabled'})"
+        )
     
     @staticmethod
     def tokenize(text: str) -> List[str]:
@@ -132,6 +150,95 @@ class CaptionEvaluator:
         
         return score
     
+    def compute_semantic_similarity(
+        self,
+        reference: str,
+        hypothesis: str
+    ) -> float:
+        """
+        Compute semantic similarity using MedImageInsight text embeddings.
+        
+        This uses the same medical domain-specific text encoder that was used
+        for generating embeddings, ensuring consistency and domain relevance.
+        
+        Args:
+            reference: Ground truth caption
+            hypothesis: Generated caption
+            
+        Returns:
+            Cosine similarity score (0-1)
+        """
+        if not self.use_semantic_similarity or self.text_embedding_model is None:
+            return 0.0
+        
+        try:
+            # Encode both captions using MedImageInsight text encoder
+            ref_output = self.text_embedding_model.encode(texts=[reference])
+            hyp_output = self.text_embedding_model.encode(texts=[hypothesis])
+            
+            ref_embedding = ref_output['text_embeddings'][0]
+            hyp_embedding = hyp_output['text_embeddings'][0]
+            
+            # Compute cosine similarity
+            ref_norm = ref_embedding / (np.linalg.norm(ref_embedding) + 1e-8)
+            hyp_norm = hyp_embedding / (np.linalg.norm(hyp_embedding) + 1e-8)
+            
+            similarity = float(np.dot(ref_norm, hyp_norm))
+            
+            # Clip to [0, 1] range (should already be, but just in case)
+            similarity = max(0.0, min(1.0, similarity))
+            
+            return similarity
+            
+        except Exception as e:
+            logger.warning(f"Semantic similarity computation failed: {e}")
+            return 0.0
+    
+    def compute_semantic_similarity(
+        self,
+        reference: str,
+        hypothesis: str
+    ) -> float:
+        """
+        Compute semantic similarity using sentence embeddings.
+        
+        Uses SentenceTransformer ('all-MiniLM-L6-v2') to encode both texts
+        and computes cosine similarity between embeddings.
+        
+        Args:
+            reference: Reference caption
+            hypothesis: Generated caption
+            
+        Returns:
+            Cosine similarity score (0-1, higher is better)
+        """
+        if not self.use_semantic_similarity or self.text_embedding_model is None:
+            return 0.0
+        
+        try:
+            # Encode both texts using MedImageInsight text encoder
+            result = self.text_embedding_model.encode(texts=[reference, hypothesis])
+            
+            # Extract text embeddings from the returned dictionary
+            embeddings = result["text_embeddings"]
+            
+            # Compute cosine similarity
+            ref_emb = embeddings[0]
+            hyp_emb = embeddings[1]
+            
+            # Normalize
+            ref_norm = ref_emb / (np.linalg.norm(ref_emb) + 1e-8)
+            hyp_norm = hyp_emb / (np.linalg.norm(hyp_emb) + 1e-8)
+            
+            # Cosine similarity
+            similarity = float(np.dot(ref_norm, hyp_norm))
+            
+            return similarity
+            
+        except Exception as e:
+            logger.warning(f"Semantic similarity computation failed: {e}")
+            return 0.0
+    
     def evaluate_single(
         self,
         reference: str,
@@ -155,6 +262,12 @@ class CaptionEvaluator:
         
         # METEOR score
         scores['meteor'] = self.compute_meteor(reference, hypothesis)
+        
+        # Semantic similarity
+        if self.use_semantic_similarity:
+            scores['semantic_similarity'] = self.compute_semantic_similarity(
+                reference, hypothesis
+            )
         
         return scores
     
@@ -193,54 +306,97 @@ class CaptionEvaluator:
     def evaluate_results(
         self,
         results: Dict[str, List[Dict[str, str]]],
-        ground_truths: Dict[str, str]
-    ) -> Dict[str, Dict[str, float]]:
+        ground_truths: Dict[str, str],
+        modalities: Optional[Dict[str, str]] = None
+    ) -> Tuple[Dict[str, Dict[str, float]], Dict[str, List[Dict]]]:
         """
-        Evaluate results from multiple generation modes.
+        Evaluate results from multiple generation modes with detailed per-sample logging.
         
         Args:
             results: Dictionary mapping method to list of generation results
             ground_truths: Dictionary mapping image_id to ground truth caption
+            modalities: Optional dictionary mapping image_id to modality
             
         Returns:
-            Dictionary mapping method to average scores
+            Tuple of (average_scores, detailed_per_sample_scores)
         """
         all_scores = {}
+        all_detailed_scores = {}
         
         for method, method_results in results.items():
             logger.info(f"Evaluating {method} results...")
             
-            # Extract references and hypotheses
+            # Extract references and hypotheses with metadata
             references = []
             hypotheses = []
+            sample_ids = []
+            sample_modalities = []
+            retrieved_contexts = []
             
             for result in method_results:
                 image_id = result['image_id']
                 if image_id in ground_truths:
                     references.append(ground_truths[image_id])
                     hypotheses.append(result['caption'])
+                    sample_ids.append(image_id)
+                    
+                    # Get modality
+                    if modalities and image_id in modalities:
+                        sample_modalities.append(modalities[image_id])
+                    else:
+                        sample_modalities.append('UNKNOWN')
+                    
+                    # Get retrieved context
+                    retrieved_contexts.append(result.get('retrieved_context', ''))
             
             if not references:
                 logger.warning(f"No valid references found for {method}")
                 continue
             
-            # Evaluate
-            avg_scores, _ = self.evaluate_batch(references, hypotheses)
+            # Evaluate batch
+            avg_scores, individual_scores = self.evaluate_batch(references, hypotheses)
             all_scores[method] = avg_scores
             
-            # Log scores
-            logger.info(f"{method.upper()} scores:")
+            # Build detailed per-sample results
+            detailed_samples = []
+            for i, (img_id, ref, hyp, scores) in enumerate(zip(
+                sample_ids, references, hypotheses, individual_scores
+            )):
+                sample_detail = {
+                    'image_id': img_id,
+                    'modality': sample_modalities[i],
+                    'ground_truth': ref,
+                    'generated_caption': hyp,
+                    'retrieved_context': retrieved_contexts[i],
+                    **scores  # Include all metric scores
+                }
+                detailed_samples.append(sample_detail)
+                
+                # Log first few samples for inspection
+                if i < 3:
+                    logger.info(f"\n  Sample {i+1} ({img_id}, {sample_modalities[i]}):")
+                    logger.info(f"    Ground truth: {ref[:100]}...")
+                    logger.info(f"    Generated: {hyp[:100]}...")
+                    logger.info(f"    BLEU-4: {scores.get('bleu_4', 0):.4f}, "
+                              f"METEOR: {scores.get('meteor', 0):.4f}, "
+                              f"Semantic: {scores.get('semantic_similarity', 0):.4f}")
+            
+            all_detailed_scores[method] = detailed_samples
+            
+            # Log average scores
+            logger.info(f"\n{method.upper()} average scores:")
             for metric, score in avg_scores.items():
                 logger.info(f"  {metric}: {score:.4f}")
         
-        return all_scores
+        return all_scores, all_detailed_scores
 
 
 def save_results(
     results: Dict[str, List[Dict[str, str]]],
     scores: Dict[str, Dict[str, float]],
     config: dict,
-    timestamp: str = None
+    timestamp: str = None,
+    detailed_scores: Optional[Dict[str, List[Dict]]] = None
 ):
     """
     Save generation results and evaluation scores with timestamp.
@@ -250,6 +406,7 @@ def save_results(
         scores: Evaluation scores for all methods
         config: Configuration dictionary
         timestamp: Optional timestamp string (will be generated if not provided)
+        detailed_scores: Optional detailed per-sample scores
     """
     from datetime import datetime
     
@@ -289,6 +446,22 @@ def save_results(
     # Also save to default location (latest run)
     metrics_latest = Path(config['output']['metrics_file'])
     df.to_csv(metrics_latest, index=False, float_format='%.4f')
+    
+    # Save detailed per-sample results if provided
+    if detailed_scores:
+        detailed_file = results_dir / f"detailed_results_{timestamp}.json"
+        logger.info(f"Saving detailed per-sample results to {detailed_file}")
+        
+        with open(detailed_file, 'w') as f:
+            json.dump(detailed_scores, f, indent=2)
+        
+        # Also save as CSV for easy analysis
+        for method, samples in detailed_scores.items():
+            if samples:
+                detailed_csv = results_dir / f"detailed_{method}_{timestamp}.csv"
+                df_detailed = pd.DataFrame(samples)
+                df_detailed.to_csv(detailed_csv, index=False, float_format='%.4f')
+                logger.info(f"Saved detailed {method} results to {detailed_csv}")
     
     logger.info(f"Results saved successfully (timestamp: {timestamp})")
 

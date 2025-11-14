@@ -200,12 +200,23 @@ class EmbeddingGenerator:
         if embeddings_file.exists() and not force_regenerate:
             logger.info(f"Loading cached embeddings from {embeddings_file}")
             data = np.load(embeddings_file, allow_pickle=True)
-            return {
+            result = {
                 'image_embeddings': data['image_embeddings'],
                 'text_embeddings': data['text_embeddings'],
                 'image_ids': data['image_ids'].tolist(),
                 'captions': data['captions'].tolist()
             }
+            # Handle backward compatibility - old embeddings without modality
+            if 'modalities' in data:
+                result['modalities'] = data['modalities'].tolist()
+            else:
+                logger.warning("Old embedding format detected, missing modality info. Extracting from captions...")
+                from data_loader import extract_modality
+                result['modalities'] = [
+                    extract_modality(cap, img_id) 
+                    for cap, img_id in zip(result['captions'], result['image_ids'])
+                ]
+            return result
         
         logger.info("Generating new embeddings...")
         
@@ -237,9 +248,10 @@ class EmbeddingGenerator:
         
         logger.info(f"Loaded {len(images)} images")
         
-        # Extract captions
+        # Extract captions and modalities
         captions = [s['caption'] for s in valid_samples]
         image_ids = [s['image_id'] for s in valid_samples]
+        modalities = [s.get('modality', 'UNKNOWN') for s in valid_samples]
         
         # Generate embeddings
         logger.info("Generating image embeddings...")
@@ -248,14 +260,15 @@ class EmbeddingGenerator:
         logger.info("Generating text embeddings...")
         text_embeddings = self.encode_texts(captions, normalize=True)
         
-        # Save embeddings
+        # Save embeddings with modality information
         logger.info(f"Saving embeddings to {embeddings_file}")
         np.savez_compressed(
             embeddings_file,
             image_embeddings=image_embeddings,
             text_embeddings=text_embeddings,
             image_ids=np.array(image_ids),
-            captions=np.array(captions)
+            captions=np.array(captions),
+            modalities=np.array(modalities)
         )
         
         logger.info(f"Embeddings saved: {image_embeddings.shape[0]} samples")
@@ -264,7 +277,8 @@ class EmbeddingGenerator:
             'image_embeddings': image_embeddings,
             'text_embeddings': text_embeddings,
             'image_ids': image_ids,
-            'captions': captions
+            'captions': captions,
+            'modalities': modalities
         }
 
 

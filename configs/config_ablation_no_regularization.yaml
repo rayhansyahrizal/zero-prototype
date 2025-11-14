@@ -1,0 +1,51 @@
+# Configuration for TTA ablation: No regularization (variance + entropy = 0)
+
+dataset:
+  source: "huggingface"
+  name: "eltorio/ROCOv2-radiology"
+  split: "test"
+  max_samples: 500
+
+medimageinsight:
+  model_dir: "/mnt/nas-hpg9/rayhan/zero-prototype/MedImageInsights/2024.09.27"
+  vision_model_name: "medimageinsigt-v1.0.0.pt"
+  language_model_name: "language_model.pth"
+
+blip2:
+  model_name: "Salesforce/blip2-opt-2.7b"
+  device: "cuda"
+  max_length: 50
+  num_beams: 5
+
+retrieval:
+  top_k: 5
+  filter_modality: true
+
+sampling:
+  num_prototypes: 100
+  method: "farthest_point"
+
+# TTA settings - NO REGULARIZATION
+tta:
+  enabled: true
+  learning_rate: 0.001
+  num_steps: 10
+  top_k_for_loss: 2
+  weight_variance: 0.0  # ABLATION: No variance penalty
+  weight_entropy: 0.0   # ABLATION: No entropy penalty
+
+evaluation:
+  metrics: ["bleu", "meteor"]
+  save_results: true
+
+output:
+  embeddings_dir: "data/embeddings"
+  prototypes_path: "data/prototypes.npy"
+  results_dir: "results/ablation_no_reg"
+  captions_file: "results/ablation_no_reg/captions.json"
+  metrics_file: "results/ablation_no_reg/metrics.csv"
+
+logging:
+  level: "INFO"
+  save_logs: true
+  log_file: "results/ablation_no_reg/pipeline.log"

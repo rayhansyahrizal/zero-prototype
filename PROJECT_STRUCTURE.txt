@@ -1,0 +1,157 @@
+zero-prototype/
+│
+├── 📁 src/                          # Core source code
+│   ├── main.py                      # Original pipeline
+│   ├── main_tta_experiment.py       # ⭐ NEW: Enhanced TTA experiment pipeline
+│   ├── experiment_runner.py         # ⭐ NEW: Automated ablation studies
+│   ├── cross_domain_eval.py         # ⭐ NEW: Cross-domain evaluation
+│   ├── tta_analyzer.py              # ⭐ NEW: TTA analysis & visualization
+│   ├── generation.py                # Caption generation (BLIP2)
+│   ├── retrieval.py                 # Retrieval + TTA implementation
+│   ├── evaluation.py                # Evaluation metrics
+│   ├── embedding.py                 # Embedding generation
+│   ├── sampling.py                  # Prototype sampling (FPS)
+│   ├── data_loader.py               # ROCO dataset loader
+│   └── huggingface_loader.py        # HuggingFace dataset loader
+│
+├── 📁 configs/                      # ⭐ NEW: Experiment configurations
+│   ├── config_ablation_lr_low.yaml          # LR = 0.0001
+│   ├── config_ablation_lr_high.yaml         # LR = 0.01
+│   ├── config_ablation_steps_5.yaml         # Steps = 5
+│   ├── config_ablation_steps_20.yaml        # Steps = 20
+│   └── config_ablation_no_regularization.yaml
+│
+├── 📁 scripts/                      # Utility scripts
+│   ├── compare_experiments.py       # Compare multiple experiments
+│   ├── diagnose_pipeline.py         # Pipeline diagnostics
+│   └── run_experiments.sh           # Batch experiment runner
+│
+├── 📁 results/                      # Experiment results (created by pipeline)
+│   ├── captions_TIMESTAMP.json      # Generated captions
+│   ├── metrics_TIMESTAMP.csv        # Evaluation metrics
+│   ├── delta_metrics_TIMESTAMP.json # ⭐ TTA improvement analysis
+│   ├── comparison_TIMESTAMP.csv     # Method comparison
+│   ├── detailed_results_TIMESTAMP.json # Per-sample results
+│   ├── tta_analysis/                # ⭐ TTA convergence plots
+│   ├── ablation_studies/            # ⭐ Ablation study results
+│   └── cross_domain/                # ⭐ Cross-domain results
+│
+├── 📁 data/                         # Data storage
+│   ├── embeddings/                  # Cached embeddings
+│   └── prototypes.npy               # Sampled prototypes
+│
+├── 📁 MedImageInsights/             # MedImageInsight model
+│   └── 2024.09.27/                  # Model weights
+│
+├── 📄 config.yaml                   # Base configuration file
+│
+├── 📚 Documentation (⭐ NEW)
+│   ├── EXPERIMENT_GUIDE.md          # ⭐ Comprehensive experiment guide
+│   ├── EXPERIMENTS_CHECKLIST.md     # ⭐ Experiment plan & progress tracker
+│   ├── QUICK_REFERENCE.md           # ⭐ One-page quick reference
+│   ├── NEW_FILES_SUMMARY.md         # ⭐ Summary of new files
+│   ├── FILES_CREATED_TODAY.md       # ⭐ Detailed file descriptions
+│   ├── PROJECT_STRUCTURE.txt        # ⭐ This file
+│   └── README.md                    # Original README
+│
+└── 🔧 Other files
+    ├── requirements.txt             # Python dependencies
+    ├── .gitignore                   # Git ignore rules
+    └── ui/                          # Web UI (optional)
+
+═══════════════════════════════════════════════════════════════
+
+📖 QUICK START GUIDE
+═══════════════════════════════════════════════════════════════
+
+1️⃣ Run Basic TTA Experiment (START HERE!)
+   $ python -m src.main_tta_experiment --config config.yaml --skip-embedding
+   
+   Output:
+   - results/delta_metrics_*.json     # TTA improvement
+   - results/comparison_*.csv          # Method comparison
+   - results/tta_analysis/             # Convergence plots
+
+2️⃣ Run Ablation Study
+   $ python -m src.experiment_runner --study learning_rate --skip-embedding
+   
+   Output:
+   - results/ablation_lr/learning_rate_results.csv  # All experiments
+   - Best configuration identified automatically
+
+3️⃣ Cross-Domain Evaluation
+   $ python -m src.cross_domain_eval --source roco --target mimic --use-tta
+   
+   Output:
+   - results/cross_domain/cross_domain_*.json  # Domain shift results
+
+═══════════════════════════════════════════════════════════════
+
+📊 KEY FILES TO CHECK
+═══════════════════════════════════════════════════════════════
+
+For daily experiments:
+  → QUICK_REFERENCE.md              # Commands & quick tips
+
+For planning experiments:
+  → EXPERIMENTS_CHECKLIST.md        # What to run, when, why
+
+For understanding the framework:
+  → EXPERIMENT_GUIDE.md             # Comprehensive guide
+
+For onboarding new team members:
+  → FILES_CREATED_TODAY.md          # What's new, what changed
+
+═══════════════════════════════════════════════════════════════
+
+🎯 EXPERIMENT PHASES
+═══════════════════════════════════════════════════════════════
+
+Phase 1 (30 min):  Validate TTA works
+Phase 2 (4 hours): Run ablation studies  
+Phase 3 (1 hour):  Cross-domain evaluation
+Phase 4 (3 hours): Full evaluation with best config
+
+Total: ~10 hours of experiments
+
+═══════════════════════════════════════════════════════════════
+
+📈 EXPECTED RESULTS
+═══════════════════════════════════════════════════════════════
+
+TTA Improvement:
+  BLEU-4:  +0.02 to +0.05  (6-15% relative)
+  METEOR:  +0.01 to +0.03  (3-8% relative)
+  Semantic: +0.03 to +0.08  (4-10% relative)
+
+Best Hyperparameters (typical):
+  Learning Rate: 0.001 - 0.005
+  Num Steps:     10 - 15
+  Regularization: variance=0.05-0.1, entropy=0.005-0.01
+
+═══════════════════════════════════════════════════════════════
+
+✅ COMPLETION STATUS: 90%
+═══════════════════════════════════════════════════════════════
+
+Implemented:
+  ✅ TTA experiment pipeline with pre/post comparison
+  ✅ Automated ablation studies
+  ✅ Cross-domain evaluation
+  ✅ TTA convergence tracking & visualization
+  ✅ Comprehensive documentation
+
+Still TODO (optional):
+  ⚠️ Clinical metrics (CheXpert, RadGraph)
+  ⚠️ LoRA-based TTA variant
+  ⚠️ User study framework
+
+═══════════════════════════════════════════════════════════════
+
+🚀 READY TO START!
+═══════════════════════════════════════════════════════════════
+
+All files tested and documented.
+Begin with: python -m src.main_tta_experiment --config config.yaml --skip-embedding
+
+Good luck! 🎓

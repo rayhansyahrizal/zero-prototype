@@ -194,10 +194,28 @@ def sample_and_save_prototypes(
     diversity = sampler.diversity_score(prototype_indices)
     logger.info(f"Prototype diversity score: {diversity:.4f}")
     
-    # Save prototypes
-    logger.info(f"Saving prototypes to {prototypes_path}")
+    # Save prototypes (NPY)
+    logger.info(f"Menyimpan prototypes ke {prototypes_path}")
     np.save(prototypes_path, prototype_indices)
-    
+
+    # Save prototypes + embeddings sebagai JSON (sesuai skripsi)
+    json_path = prototypes_path.parent / "prototypes.json"
+    logger.info(f"Menyimpan prototypes + embeddings ke {json_path}")
+
+    prototype_data = {
+        "num_prototypes": int(len(prototype_indices)),
+        "sampling_method": method,
+        "diversity_score": float(diversity),
+        "indices": prototype_indices.tolist(),
+        "embeddings": embeddings[prototype_indices].tolist()
+    }
+
+    import json
+    with open(json_path, 'w') as f:
+        json.dump(prototype_data, f, indent=2)
+
+    logger.info(f"✅ Prototypes tersimpan: {len(prototype_indices)} sampel (diversity={diversity:.4f})")
+
     return prototype_indices
 
 

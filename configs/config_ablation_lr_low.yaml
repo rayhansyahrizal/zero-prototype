@@ -1,0 +1,64 @@
+# Configuration for TTA ablation: Low learning rate
+# Based on base config with modified TTA parameters
+
+# Dataset configuration
+dataset:
+  source: "huggingface"
+  name: "eltorio/ROCOv2-radiology"
+  root_dir: "/mnt/nas-hpg9/rayhan/zero-prototype/roco-dataset"
+  modality: "radiology"
+  split: "test"
+  max_samples: 500
+
+# MedImageInsight model paths
+medimageinsight:
+  model_dir: "/mnt/nas-hpg9/rayhan/zero-prototype/MedImageInsights/2024.09.27"
+  vision_model_name: "medimageinsigt-v1.0.0.pt"
+  language_model_name: "language_model.pth"
+
+# BLIP2 model
+blip2:
+  model_name: "Salesforce/blip2-opt-2.7b"
+  device: "cuda"
+  max_length: 50
+  num_beams: 5
+
+# Retrieval settings
+retrieval:
+  top_k: 5
+  use_prototypes: false
+  filter_modality: true
+
+# Prototype sampling
+sampling:
+  num_prototypes: 100
+  sample_k: 100
+  method: "farthest_point"
+
+# Test-Time Adaptation (TTA) settings - LOW LEARNING RATE
+tta:
+  enabled: true
+  learning_rate: 0.0001  # ABLATION: Very low LR
+  num_steps: 10
+  top_k_for_loss: 2
+  weight_variance: 0.1
+  weight_entropy: 0.01
+
+# Evaluation
+evaluation:
+  metrics: ["bleu", "meteor"]
+  save_results: true
+
+# Paths for saving outputs
+output:
+  embeddings_dir: "data/embeddings"
+  prototypes_path: "data/prototypes.npy"
+  results_dir: "results/ablation_lr_low"
+  captions_file: "results/ablation_lr_low/captions.json"
+  metrics_file: "results/ablation_lr_low/metrics.csv"
+
+# Logging
+logging:
+  level: "INFO"
+  save_logs: true
+  log_file: "results/ablation_lr_low/pipeline.log"

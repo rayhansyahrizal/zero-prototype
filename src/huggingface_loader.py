@@ -182,7 +182,7 @@ class HuggingFaceDataLoader:
     
     def normalize_sample(self, sample: Dict) -> Dict[str, str]:
         """
-        Normalize sample to standard format: {image_id, image, caption}.
+        Normalize sample to standard format: {image_id, image, caption, modality}.
         
         This handles different dataset schemas.
         
@@ -192,6 +192,8 @@ class HuggingFaceDataLoader:
         Returns:
             Normalized dictionary with standard keys
         """
+        from data_loader import extract_modality
+        
         normalized = {}
         
         # Detect and map image field
@@ -212,6 +214,15 @@ class HuggingFaceDataLoader:
             normalized['image_id'] = str(sample[id_keys[0]])
         else:
             normalized['image_id'] = f"sample_{id(sample)}"
+        
+        # Extract modality from caption
+        if 'caption' in normalized:
+            normalized['modality'] = extract_modality(
+                normalized['caption'], 
+                normalized.get('image_id', '')
+            )
+        else:
+            normalized['modality'] = 'UNKNOWN'
         
         # Include any extra fields
         for key, value in sample.items():

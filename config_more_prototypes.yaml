@@ -1,0 +1,65 @@
+# Zero-shot Medical Image Captioning Configuration
+# EXPERIMENTAL: More prototypes (300) with original TTA
+
+# Dataset configuration
+dataset:
+  source: "huggingface"
+  name: "eltorio/ROCOv2-radiology"
+  root_dir: "/mnt/nas-hpg9/rayhan/zero-prototype/roco-dataset"
+  modality: "radiology"
+  split: "test"
+  max_samples: 1000
+
+# MedImageInsight model paths
+medimageinsight:
+  model_dir: "/mnt/nas-hpg9/rayhan/zero-prototype/MedImageInsights/2024.09.27"
+  vision_model_name: "medimageinsigt-v1.0.0.pt"
+  language_model_name: "language_model.pth"
+
+# BLIP2 model
+blip2:
+  model_name: "Salesforce/blip2-opt-2.7b"
+  device: "cuda"
+  max_length: 100
+  num_beams: 5
+
+# Retrieval settings
+retrieval:
+  top_k: 5
+  use_prototypes: false
+  filter_modality: true
+  similarity_threshold: 0.5  # NEW: Filter low similarity
+
+# Prototype sampling
+sampling:
+  num_prototypes: 300  # INCREASED: from 100 → 300
+  sample_k: 300
+  method: "farthest_point"
+
+# Test-Time Adaptation (TTA) settings - ORIGINAL but with more prototypes
+tta:
+  enabled: true
+  learning_rate: 0.001
+  num_steps: 10
+  top_k_for_loss: 5  # INCREASED: from 2 → 5
+  weight_variance: 0.1
+  weight_entropy: 0.01
+
+# Evaluation
+evaluation:
+  metrics: ["bleu", "meteor"]
+  save_results: true
+
+# Paths for saving outputs
+output:
+  embeddings_dir: "data/embeddings"
+  prototypes_path: "data/prototypes_300.npy"
+  results_dir: "results/more_prototypes"
+  captions_file: "results/more_prototypes/captions.json"
+  metrics_file: "results/more_prototypes/metrics.csv"
+
+# Logging
+logging:
+  level: "INFO"
+  save_logs: true
+  log_file: "results/more_prototypes/pipeline.log"

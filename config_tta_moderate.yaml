@@ -1,0 +1,65 @@
+# Zero-shot Medical Image Captioning Configuration
+# EXPERIMENTAL: Moderate TTA (balanced approach)
+
+# Dataset configuration
+dataset:
+  source: "huggingface"
+  name: "eltorio/ROCOv2-radiology"
+  root_dir: "/mnt/nas-hpg9/rayhan/zero-prototype/roco-dataset"
+  modality: "radiology"
+  split: "test"
+  max_samples: 1000
+
+# MedImageInsight model paths
+medimageinsight:
+  model_dir: "/mnt/nas-hpg9/rayhan/zero-prototype/MedImageInsights/2024.09.27"
+  vision_model_name: "medimageinsigt-v1.0.0.pt"
+  language_model_name: "language_model.pth"
+
+# BLIP2 model
+blip2:
+  model_name: "Salesforce/blip2-opt-2.7b"
+  device: "cuda"
+  max_length: 100
+  num_beams: 5
+
+# Retrieval settings
+retrieval:
+  top_k: 5
+  use_prototypes: false
+  filter_modality: true
+  similarity_threshold: 0.5  # NEW: Moderate threshold
+
+# Prototype sampling
+sampling:
+  num_prototypes: 200  # INCREASED: from 100 → 200
+  sample_k: 200
+  method: "farthest_point"
+
+# Test-Time Adaptation (TTA) settings - MODERATE
+tta:
+  enabled: true
+  learning_rate: 0.0005  # DECREASED: from 0.001 → 0.0005 (2x smaller)
+  num_steps: 20  # INCREASED: from 10 → 20 (2x more iterations)
+  top_k_for_loss: 5  # INCREASED: from 2 → 5
+  weight_variance: 0.05  # DECREASED: from 0.1 → 0.05
+  weight_entropy: 0.005  # DECREASED: from 0.01 → 0.005
+
+# Evaluation
+evaluation:
+  metrics: ["bleu", "meteor"]
+  save_results: true
+
+# Paths for saving outputs
+output:
+  embeddings_dir: "data/embeddings"
+  prototypes_path: "data/prototypes_moderate.npy"
+  results_dir: "results/moderate"
+  captions_file: "results/moderate/captions.json"
+  metrics_file: "results/moderate/metrics.csv"
+
+# Logging
+logging:
+  level: "INFO"
+  save_logs: true
+  log_file: "results/moderate/pipeline.log"

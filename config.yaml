@@ -26,18 +26,29 @@ medimageinsight:
 blip2:
   model_name: "Salesforce/blip2-opt-2.7b"
   device: "cuda"  # or "cpu"
-  max_length: 50
+  max_length: 100
   num_beams: 5
   
 # Retrieval settings
 retrieval:
-  top_k: 5  # Number of captions to retrieve
+  top_k: 5  # Jumlah caption yang diambil dari retrieval (top-k similarity)
   use_prototypes: false  # Enable prototype sampling
-  
+  filter_modality: true  # Filter by same modality (XR, CT, MRI, etc.)
+
 # Prototype sampling
 sampling:
-  num_prototypes: 100  # Number of prototypes to select
-  method: "farthest_point"  # Sampling strategy
+  num_prototypes: 100  # Jumlah sampel prototype (k) yang dipilih dari EDB1
+  sample_k: 100  # Alias untuk num_prototypes (konsisten dengan terminologi skripsi)
+  method: "farthest_point"  # Strategi sampling: "farthest_point" atau "random"
+
+# Test-Time Adaptation (TTA) settings
+tta:
+  enabled: true  # Enable TTA for prototype retrieval
+  learning_rate: 0.001  # SGD learning rate
+  num_steps: 10  # Number of adaptation steps
+  top_k_for_loss: 2  # Number of top prototypes to use in loss
+  weight_variance: 0.1  # Weight for variance regularization
+  weight_entropy: 0.01  # Weight for entropy regularization
   
 # Evaluation
 evaluation:
